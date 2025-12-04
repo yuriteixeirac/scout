@@ -9,8 +9,8 @@ import (
 func main() {
 	server := http.NewServeMux()
 
-	server.HandleFunc("/add", handlers.RegisterUrl)
-	server.HandleFunc("/get", handlers.SearchUrls)
+	server.HandleFunc("POST /add", handlers.RegisterUrl)
+	server.HandleFunc("GET /get", handlers.SearchUrls)
 
 	http.ListenAndServe(":8080", server)
 }
