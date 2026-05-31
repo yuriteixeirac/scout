@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/aaaton/golem/v4"
@@ -17,11 +19,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// ok to ignore error
+var DB, _ = strconv.ParseInt(os.Getenv("REDIS_DB"), 0, 32)
+var protocol, _ = strconv.ParseInt(os.Getenv("REDIS_PROTOCOL"), 0, 32)
+
 var rediscl = redis.NewClient(&redis.Options{
-	Addr:     "redis:6379",
-	Password: "",
-	DB:       0,
-	Protocol: 2,
+	Addr:     os.Getenv("REDIS_SERVER"),
+	DB:       int(DB),
+	Password: os.Getenv("REDIS_PASSWORD"),
+	Protocol: int(protocol),
 })
 
 var ctx = context.Background()
@@ -31,17 +37,32 @@ var nonAlphaRegex, _ = regexp.Compile(`[^a-zA-Z]+`)
 
 func init() {
 	// Reading and/or caching of stop words
-	result, _ := rediscl.SMembers(ctx, "stop_words").Result()
+	result, err := rediscl.SMembers(ctx, "stop_words").Result()
+
+	if err != nil {
+		log.Fatal(err.Error())
+		return
+	}
+
 	if len(result) == 0 {
 		content, err := os.ReadFile("data/stopwords.json")
 		if err != nil {
-			panic(err)
+			fmt.Println(err.Error())
+			return
 		}
 
-		json.Unmarshal(content, &result)
+		err = json.Unmarshal(content, &result)
+		if err != nil {
+			fmt.Println(err.Error())
+			return
+		}
 
 		for _, word := range result {
-			rediscl.SAdd(ctx, "stop_words", word)
+			err := rediscl.SAdd(ctx, "stop_words", word)
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
 		}
 	}
 	stopwordsMap = make(map[string]struct{}, len(result))
@@ -62,21 +83,24 @@ func ProcessWord(word string) string {
 }
 
 func TokenizeResponse(url string) error {
-	wg := sync.WaitGroup{}
 	// GETs the page
-	req, err := http.Get(url)
+	client := &http.Client{
+		Timeout: time.Second * 10,
+	}
+
+	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
 
-	defer req.Body.Close()
+	defer resp.Body.Close()
 
-	if req.StatusCode > 400 {
-		return fmt.Errorf("request obtained %d status code", req.StatusCode)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("request obtained %d status code", resp.StatusCode)
 	}
 
 	// Fetchs page content
-	doc, err := goquery.NewDocumentFromReader(req.Body)
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -87,28 +111,41 @@ func TokenizeResponse(url string) error {
 	tokenizedContent := strings.Fields(doc.Text())
 
 	// For each token, process and caches it
-	for _, word := range tokenizedContent {
-		wg.Add(1)
-		go func(word string) {
-			defer wg.Done()
-			processedWord := ProcessWord(word)
 
-			if processedWord != "" {
-				rediscl.SAdd(ctx, processedWord, url)
-			}
-		}(word)
+	terms := make(map[string]struct{})
+
+	for _, word := range tokenizedContent {
+		processedWord := ProcessWord(word)
+		if processedWord != "" {
+			terms[processedWord] = struct{}{}
+		}
 	}
-	wg.Wait()
+
+	pipe := rediscl.Pipeline()
+
+	for term := range terms {
+		pipe.SAdd(ctx, term, url)
+	}
+
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func FetchUrls(query string) []string {
+func FetchUrls(query string) ([]string, error) {
 	urls := []string{}
 
 	tokenizedQuery := strings.Fields(query)
 	for _, token := range tokenizedQuery {
-		currentUrls, _ := rediscl.SMembers(ctx, ProcessWord(token)).Result()
+		currentUrls, err := rediscl.SMembers(ctx, ProcessWord(token)).Result()
+		if err != nil {
+			fmt.Println(err.Error())
+			return []string{}, err
+		}
+
 		if len(currentUrls) == 0 {
 			continue
 		}
@@ -120,5 +157,5 @@ func FetchUrls(query string) []string {
 		}
 	}
 
-	return urls
+	return urls, nil
 }

@@ -10,14 +10,37 @@ import (
 )
 
 func SearchUrls(w http.ResponseWriter, r *http.Request) {
-	var query models.Query
-	json.NewDecoder(r.Body).Decode(&query)
+	w.Header().Set("Content-Type", "application/json")
 
-	response, _ := json.Marshal(
+	var query models.Query
+	err := json.NewDecoder(r.Body).Decode(&query)
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w)
+		return
+	}
+
+	queryResults, err := utils.FetchUrls(query.Query)
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "%s", err.Error())
+		return
+	}
+
+	response, err := json.Marshal(
 		models.QueryResponse{
-			Results: utils.FetchUrls(query.Query),
+			Results: queryResults,
 		},
 	)
 
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, string(response))
 }

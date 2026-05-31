@@ -10,16 +10,25 @@ import (
 )
 
 func RegisterUrl(w http.ResponseWriter, r *http.Request) {
-	var urls models.Urls
-	json.NewDecoder(r.Body).Decode(&urls)
+	w.Header().Set("Content-Type", "application/json")
 
-	for _, url := range urls.Url {
-		err := utils.TokenizeResponse(url)
-		if err != nil {
-			fmt.Fprintf(w, "%s", err.Error())
-			return
-		}
+	var req models.Urls
+	err := json.NewDecoder(r.Body).Decode(&req)
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", err.Error())
+		return
 	}
 
-	fmt.Fprint(w, http.StatusCreated)
+	err = utils.TokenizeResponse(req.Url)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "%s", err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+
+	fmt.Fprint(w)
 }

@@ -12,6 +12,16 @@ The indexing process includes tokenization, lemmatization, and stop-word filteri
 - Goquery for HTML scraping;
 - Redis for cache and key/value data.
 
+# Redis config
+
+Set all these enviroment variables to set up redis.
+```
+REDIS_SERVER=
+REDIS_PASSWORD=
+REDIS_PROTOCOL=
+REDIS_DB=
+```
+
 ## API Endpoints
 ### POST add/
 Requires a url and indexes its content.
@@ -32,13 +42,13 @@ WORD -> SET(url1, url2)
 ``
 
 **Responses**:
-- `200 OK` - content indexed.
+- `201 OK` - content indexed.
 - `4xx, 500` response from the HTTP request internal processing.
 
-### GET /get
+### POST /query
 Searches for URLs relevant to the query.
 
-
+Request body:
 ```
 {
     "query": "how to study more efficiently"
@@ -52,8 +62,10 @@ Behaviour:
 
 **Response**:
 ```
-[
-    "https://example.article.one/",
-    "https://example.article.two/"
-]
+{
+  "results": [
+      "https://example.article.one/",
+      "https://example.article.two/"
+    ]
+}
 ```
